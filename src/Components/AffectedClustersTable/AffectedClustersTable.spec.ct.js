@@ -30,6 +30,8 @@ import {
   checkTableHeaders,
   checkRowCounts,
   tableIsSortedBy,
+  checkEmptyState,
+  checkNoMatchingClusters,
 } from '../../../cypress/utils/table';
 import {
   itemsPerPage,
@@ -51,12 +53,13 @@ const BULK_SELECT = 'clusters-selector';
 const SEARCH_ITEMS = ['ff', 'CUSTOM', 'Foobar', 'Not existing cluster'];
 const TABLE_HEADERS = _.map(AFFECTED_CLUSTERS_COLUMNS, (it) => it.title);
 
-let data = _.cloneDeep(clusterDetailData.data['enabled']);
-data.forEach(
+let values = _.cloneDeep(clusterDetailData.data['enabled']);
+values.forEach(
   (it) => (it['name'] = it['cluster_name'] ? it['cluster_name'] : it['cluster'])
 );
+const dataUnsorted = _.cloneDeep(values);
 // default sorting
-data = _.orderBy(data, ['last_checked_at'], ['desc']);
+const data = _.orderBy(values, ['last_checked_at'], ['desc']);
 
 const filtersConf = {
   name: {
@@ -111,6 +114,8 @@ describe('test data', () => {
     expect(filterData({ version: [''] })).to.have.length.gte(1);
   });
 });
+
+// TODO: when checking empty state, also check toolbar available and not disabled
 
 describe('non-empty successful affected clusters table', () => {
   beforeEach(() => {
@@ -225,6 +230,33 @@ describe('non-empty successful affected clusters table', () => {
       cy.get(MODAL).should('have.length', 1);
     });
 
+    it('checkbox can be un-clicked and all row are unselected', () => {
+      cy.ouiaId(BULK_SELECT, 'input').dblclick().should('not.be.checked');
+      // contains right text
+      cy.get('#toggle-checkbox-text').should('not.exist');
+      // checks all rows
+      cy.get(TABLE)
+        .find(TBODY)
+        .find(ROW)
+        .each((row) => {
+          cy.wrap(row)
+            .find('td')
+            .first()
+            .find('input')
+            .should('not.be.checked');
+        });
+      // bulk disabling button is not enabled
+      cy.get(TOOLBAR)
+        .find('.pf-m-spacer-sm')
+        .find(DROPDOWN)
+        .within((el) => {
+          cy.wrap(el).click();
+          cy.get('button')
+            .contains('Disable recommendation for selected clusters')
+            .should('have.class', 'pf-m-disabled');
+        });
+    });
+
     it('checkbox is unselected when a row is unselected', () => {
       cy.ouiaId(BULK_SELECT).find('input').click().should('be.checked');
       // removing one row unselects it
@@ -249,26 +281,6 @@ describe('non-empty successful affected clusters table', () => {
           cy.get('button')
             .contains('Disable recommendation for selected clusters')
             .should('not.have.class', 'pf-m-disabled');
-        });
-    });
-
-    it('checkbox unchecking removes all checks from rows', () => {
-      cy.ouiaId(BULK_SELECT).find('input').click().should('be.checked');
-
-      cy.ouiaId(BULK_SELECT).find('input').click();
-      cy.ouiaId(BULK_SELECT)
-        .find('label.pf-c-dropdown__toggle-check')
-        .contains('selected')
-        .should('not.exist');
-      cy.get(TABLE)
-        .find(TBODY)
-        .find(ROW)
-        .each((row) => {
-          cy.wrap(row)
-            .find('td')
-            .first()
-            .find('input')
-            .should('not.be.checked');
         });
     });
 
@@ -309,9 +321,7 @@ describe('non-empty successful affected clusters table', () => {
 
       cy.ouiaId(BULK_SELECT).find('input').should('be.checked');
       // contains right text
-      cy.ouiaId(BULK_SELECT)
-        .find('label.pf-c-dropdown__toggle-check')
-        .contains(`${data.length} selected`);
+      cy.get('#toggle-checkbox-text').contains(`${data.length} selected`);
       // checks all rows
       cy.get(TABLE)
         .find(TBODY)
@@ -359,6 +369,23 @@ describe('non-empty successful affected clusters table', () => {
             .should('have.class', 'pf-m-disabled');
         });
       cy.get('#toggle-checkbox-text').should('not.exist');
+    });
+
+    it('text is updated according to the number of rows selected', () => {
+      let nSelectedRows = 0;
+      // select some rows
+      cy.get(TABLE)
+        .find(TBODY)
+        .find(ROW)
+        .each((row, index) => {
+          if (index % 2 == 0 && index < DEFAULT_ROW_COUNT) {
+            cy.wrap(row).find('td').first().find('input').click();
+            nSelectedRows += 1;
+          }
+        })
+        .then(() => {
+          cy.get('#toggle-checkbox-text').contains(`${nSelectedRows} selected`);
+        });
     });
   });
 
@@ -417,12 +444,7 @@ describe('non-empty successful affected clusters table', () => {
           }
 
           // add property name to clusters
-          let sortedClusters = _.cloneDeep(
-            clusterDetailData.data['enabled'].map((it) => ({
-              ...it,
-              name: it['cluster_name'] ? it['cluster_name'] : it['cluster'],
-            }))
-          );
+          let sortedClusters = _.cloneDeep(dataUnsorted);
           // convert N/A timestamps as really old ones
           sortedClusters.forEach((it) => {
             if (it['last_checked_at'] === '') {
@@ -463,7 +485,6 @@ describe('non-empty successful affected clusters table', () => {
   });
 
   describe('filtering', () => {
-    // TODO: use filtersConf approach
     it('no chips are displayed by default', () => {
       cy.get(CHIP_GROUP).should('not.exist');
       cy.get('button').contains('Reset filters').should('not.exist');
@@ -478,8 +499,8 @@ describe('non-empty successful affected clusters table', () => {
             let sortedNames = _.map(filterData(filters), 'name');
             filterApply(filters);
             if (sortedNames.length === 0) {
-              // TODO check empty table view
-              // TODO headers are displayed
+              checkNoMatchingClusters();
+              checkTableHeaders(TABLE_HEADERS);
             } else {
               cy.get(`td[data-label="Name"]`)
                 .then(($els) => {
@@ -515,7 +536,7 @@ describe('non-empty successful affected clusters table', () => {
           let sortedNames = _.map(filterData(filters), 'name');
           filterApply(filters);
           if (sortedNames.length === 0) {
-            // TODO check empty table view
+            checkNoMatchingClusters;
           } else {
             cy.get(`td[data-label="Name"]`)
               .then(($els) => {
@@ -555,8 +576,8 @@ describe('non-empty successful affected clusters table', () => {
 
     it('empty state is displayed when filters do not match any rule', () => {
       cy.get('#name-filter').type('Not existing cluster');
-      // TODO check empty table view
-      // TODO headers are displayed
+      checkNoMatchingClusters();
+      checkTableHeaders(TABLE_HEADERS);
     });
   });
 
@@ -692,9 +713,7 @@ describe('empty successful affected clusters table', () => {
   });
 
   it('renders no clusters message', () => {
-    cy.get('#empty-state-message')
-      .find('h4')
-      .should('have.text', 'No clusters');
+    checkEmptyState('No clusters', true);
   });
 
   it('renders table headers', () => {
@@ -729,8 +748,8 @@ describe('empty failed affected clusters table', () => {
   });
 
   it('renders error message', () => {
-    cy.get('#error-state-message')
-      .find('h4')
+    cy.get('[ouiaid="empty-state"]')
+      .find('h5')
       .should('have.text', 'Something went wrong');
   });
 

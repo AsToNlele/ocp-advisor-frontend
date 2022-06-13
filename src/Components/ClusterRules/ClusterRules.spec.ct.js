@@ -17,13 +17,19 @@ import {
 } from '../../../cypress/utils/globals';
 import { applyFilters, filter } from '../../../cypress/utils/filters';
 import { cumulativeCombinations } from '../../../cypress/utils/combine';
-import { checkTableHeaders } from '../../../cypress/utils/table';
+import {
+  checkEmptyState,
+  checkNoMatchingRecs,
+  checkTableHeaders,
+  checkRowCounts,
+} from '../../../cypress/utils/table';
 import {
   CHIP_GROUP,
   CHIP,
   ROW,
   TOOLBAR,
   TABLE,
+  ROWS_TOGGLER,
 } from '../../../cypress/utils/components';
 
 const data = singleClusterPageReport.report.data;
@@ -64,13 +70,15 @@ const filtersConf = {
   },
 };
 
-const filterData = (data, filters) => filter(filtersConf, data, filters);
+const filterData = (filters) => filter(filtersConf, data, filters);
 const filterApply = (filters) => applyFilters(filters, filtersConf);
 
 // TODO add more combinations of filters for testing
 const filterCombos = [
   { risk: ['Critical', 'Moderate'], category: ['Service Availability'] },
 ];
+
+// TODO: when checking empty state, also check toolbar available and not disabled
 
 describe('test data', () => {
   it('has rules', () => {
@@ -96,22 +104,20 @@ describe('test data', () => {
     expect(_.uniq(_.map(data, 'description'))).to.have.length.gte(2);
   });
   it('has only 1 description matching "1Lorem"', () => {
-    expect(filterData(data, { description: '1Lorem' })).to.have.lengthOf(1);
+    expect(filterData({ description: '1Lorem' })).to.have.lengthOf(1);
   });
   it('has multiple descriptions matching "Lorem ipsum"', () => {
-    expect(filterData(data, { description: 'Lorem ipsum' })).to.have.length.gt(
-      1
-    );
+    expect(filterData({ description: 'Lorem ipsum' })).to.have.length.gt(1);
   });
   it('has no descriptions matching "Not existing recommendation"', () => {
     expect(
-      filterData(data, {
+      filterData({
         description: 'Not existing recommendation',
       })
     ).to.have.lengthOf(0);
   });
   it('the first combo filter has less rules hitting that the default and at least one', () => {
-    const filteredData = filterData(data, filterCombos[0]);
+    const filteredData = filterData(filterCombos[0]);
     expect(filteredData).to.have.length.gte(1);
     expect(filteredData).to.have.length.lt(RULES_ENABLED);
   });
@@ -160,7 +166,7 @@ describe('cluster rules table', () => {
   it('total risk is mapped', () => {
     cy.get('td[data-label="Total risk"]').each((el) => {
       cy.wrap(el).should((risk) => {
-        expect(risk.get(0).innerText).to.be.oneOf(TOTAL_RISK_VALUES);
+        expect(risk.text()).to.be.oneOf(TOTAL_RISK_VALUES);
       });
     });
   });
@@ -174,14 +180,15 @@ describe('cluster rules table', () => {
       cy.get(CHIP_GROUP).should('not.exist');
       cy.get('button').contains('Reset filters').should('not.exist');
     });
+    it('all expected rows are displayed', () => {
+      checkRowCounts(RULES_ENABLED);
+    });
   });
 
   it('expand all, collapse all', () => {
-    const TOOLBAR = '[class="pf-c-toolbar__item"]';
-
-    cy.get(TOOLBAR).find('button').click();
+    cy.get(ROWS_TOGGLER).click();
     cy.get(EXPANDABLES).should('have.length', RULES_ENABLED);
-    cy.get(TOOLBAR).find('button').click();
+    cy.get(ROWS_TOGGLER).click();
     cy.get(EXPANDABLES).should('have.length', 0);
   });
 
@@ -256,8 +263,8 @@ describe('cluster rules table', () => {
       filterApply({
         description: 'Not existing recommendation',
       });
-      // TODO check empty table view
-      // TODO headers are displayed
+      checkNoMatchingRecs();
+      checkTableHeaders(TABLE_HEADERS);
     });
 
     describe('single filter', () => {
@@ -267,13 +274,13 @@ describe('cluster rules table', () => {
             const filters = {};
             filters[k] = filterValues;
             const sortedDescriptions = _.map(
-              filterData(data, filters),
+              filterData(filters),
               'description'
             ).sort();
             filterApply(filters);
             if (sortedDescriptions.length === 0) {
-              // TODO check empty table view
-              // TODO headers are displayed
+              checkNoMatchingRecs();
+              checkTableHeaders(TABLE_HEADERS);
             } else {
               cy.get(`td[data-label="Description"]`)
                 .then(($els) => {
@@ -310,12 +317,12 @@ describe('cluster rules table', () => {
       filterCombos.forEach((filters) => {
         it(`${Object.keys(filters)}`, () => {
           const sortedDescriptions = _.map(
-            filterData(data, filters),
+            filterData(filters),
             'description'
           ).sort();
           filterApply(filters);
           if (sortedDescriptions.length === 0) {
-            // TODO check empty table view
+            checkNoMatchingRecs();
           } else {
             cy.get(`td[data-label="Description"]`)
               .then(($els) => {
@@ -385,13 +392,10 @@ describe('empty cluster rules table', () => {
   });
 
   it('renders no recommendation message', () => {
-    cy.get('[data-ouia-component-id="no-recommendations"]')
-      .contains('The cluster is not affected by any known recommendations')
-      .should('exist');
-  });
-
-  it('does not render table', () => {
-    cy.get(TABLE).should('not.exist');
+    checkEmptyState(
+      'The cluster is not affected by any known recommendations',
+      true
+    );
   });
 });
 
